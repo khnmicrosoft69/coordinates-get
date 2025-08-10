@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Device Coordinates with DMS</title>
+<style>
+:root {
+  --bg: #0f1724;
+  --card: #0b1220;
+  --accent: #06b6d4;
+  --muted: #9aa6b2;
+  --success: #10b981;
+  --danger: #ef4444;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 24px;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  background: linear-gradient(180deg, #071427 0%, #071018 100%);
+  color: #e6eef6;
+}
+.wrap { max-width: 720px; margin: 0 auto; }
+header { display: flex; gap: 12px; align-items: center; }
+h1 { font-size: 1.25rem; margin: 0; }
+p.lead { color: var(--muted); margin: 6px 0 18px; font-size: .95rem; }
+.card {
+  background: var(--card);
+  padding: 16px;
+  border-radius: 12px;
+  box-shadow: 0 6px 18px rgba(2,6,11,.6);
+}
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+.big { font-size: 1.1rem; font-weight: 600; }
+.muted { color: var(--muted); font-size: .9rem; }
+button {
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+  border: 1px solid rgba(255,255,255,.06);
+  color: inherit;
+  padding: 8px 12px;
+  border-radius: 9px;
+  cursor: pointer;
+  font-weight: 600;
+}
+button.primary { border-color: var(--accent); box-shadow: 0 6px 18px rgba(6,182,212,.06); }
+button.ghost { background: transparent; border: 1px dashed rgba(255,255,255,.04); }
+.status { padding: 8px 10px; border-radius: 8px; font-weight: 600; }
+.status.ok { background: rgba(16,185,129,.08); color: var(--success); }
+.status.err { background: rgba(239,68,68,.08); color: var(--danger); }
+pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(0,0,0,.15);
+  padding: 10px;
+  border-radius: 8px;
+}
+footer { margin-top: 14px; color: var(--muted); font-size: .85rem; }
+@media (max-width:560px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Device Coordinates</h1>
+  </header>
+  <p class="lead">Shows your current latitude, longitude (both decimal and DMS), accuracy, and timestamp. Click <strong>Start Tracking</strong> for live updates.</p>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div class="muted">Permission status:</div>
+        <div id="perm" class="status muted" style="margin-top:6px;display:inline-block">unknown</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button id="startBtn" class="primary">Start Tracking</button>
+        <button id="stopBtn" class="ghost" disabled>Stop</button>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-top:14px">
+      <div>
+        <div class="muted">Latitude</div>
+        <div id="lat" class="big">—</div>
+        <div id="latDMS" class="muted" style="font-size:0.85rem;">—</div>
+      </div>
+      <div>
+        <div class="muted">Longitude</div>
+        <div id="lon" class="big">—</div>
+        <div id="lonDMS" class="muted" style="font-size:0.85rem;">—</div>
+      </div>
+      <div>
+        <div class="muted">Accuracy</div>
+        <div id="acc" class="big">—</div>
+      </div>
+      <div>
+        <div class="muted">Altitude</div>
+        <div id="alt" class="big">—</div>
+      </div>
+      <div style="grid-column:1/-1">
+        <div class="muted">Timestamp</div>
+        <div id="ts" class="muted">—</div>
+      </div>
+      <div style="grid-column:1/-1">
+        <div class="muted">Raw Data</div>
+        <pre id="raw">—</pre>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button id="copyBtn">Copy</button>
+          <a id="gmaps" href="#" target="_blank" rel="noopener">
+            <button>Open in Google Maps</button>
+          </a>
+          <button id="getOnce" class="ghost">Get Once</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Notes: Best accuracy on mobile with GPS enabled. If results seem wrong, check browser location settings.
+  </footer>
+</div>
+
+<script>
+// Utility to convert decimal degrees to DMS string for latitude
+function decimalToDMSLat(lat) {
+  const absolute = Math.abs(lat);
+  const degrees = Math.floor(absolute);
+  const minutesNotTruncated = (absolute - degrees) * 60;
+  const minutes = Math.floor(minutesNotTruncated);
+  const seconds = ((minutesNotTruncated - minutes) * 60).toFixed(1);
+  const direction = lat >= 0 ? 'N' : 'S';
+  return `${degrees}°${minutes}'${seconds}"${direction}`;
+}
+
+// Utility to convert decimal degrees to DMS string for longitude
+function decimalToDMSLon(lon) {
+  const absolute = Math.abs(lon);
+  const degrees = Math.floor(absolute);
+  const minutesNotTruncated = (absolute - degrees) * 60;
+  const minutes = Math.floor(minutesNotTruncated);
+  const seconds = ((minutesNotTruncated - minutes) * 60).toFixed(1);
+  const direction = lon >= 0 ? 'E' : 'W';
+  return `${degrees}°${minutes}'${seconds}"${direction}`;
+}
+
+const el = id => document.getElementById(id);
+const startBtn = el('startBtn');
+const stopBtn = el('stopBtn');
+const getOnceBtn = el('getOnce');
+const copyBtn = el('copyBtn');
+const permEl = el('perm');
+const latEl = el('lat');
+const lonEl = el('lon');
+const latDMSEl = el('latDMS');
+const lonDMSEl = el('lonDMS');
+const accEl = el('acc');
+const altEl = el('alt');
+const tsEl = el('ts');
+const rawEl = el('raw');
+const gmapsLink = el('gmaps');
+
+let watchId = null;
+
+function setPermission(state) {
+  permEl.textContent = state;
+  permEl.className = 'status ' + (state === 'granted' ? 'ok' : state === 'denied' ? 'err' : '');
+}
+
+function formatTimestamp(ms) {
+  return ms ? new Date(ms).toLocaleString() : '—';
+}
+
+function updateView(pos) {
+  if (!pos) return;
+  const { latitude, longitude, accuracy, altitude } = pos.coords;
+
+  // Show decimal degrees
+  latEl.textContent = latitude.toFixed(6);
+  lonEl.textContent = longitude.toFixed(6);
+
+  // Show DMS
+  latDMSEl.textContent = decimalToDMSLat(latitude);
+  lonDMSEl.textContent = decimalToDMSLon(longitude);
+
+  accEl.textContent = accuracy != null ? `${accuracy} m` : '—';
+  altEl.textContent = altitude != null ? `${altitude} m` : '—';
+  tsEl.textContent = formatTimestamp(pos.timestamp);
+
+  rawEl.textContent = JSON.stringify({
+    latitude, longitude, accuracy, altitude, timestamp: new Date(pos.timestamp).toISOString()
+  }, null, 2);
+
+  gmapsLink.href = `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
+  gmapsLink.title = `Open ${latitude.toFixed(6)}, ${longitude.toFixed(6)} in Google Maps`;
+}
+
+function onError(err) {
+  console.warn('Geolocation error:', err);
+  latEl.textContent = '—';
+  lonEl.textContent = '—';
+  latDMSEl.textContent = '—';
+  lonDMSEl.textContent = '—';
+  accEl.textContent = '—';
+  altEl.textContent = '—';
+  tsEl.textContent = err.message || 'Error';
+  rawEl.textContent = `Error: ${err.code} — ${err.message || ''}`;
+  setPermission('denied');
+}
+
+function startTracking() {
+  if (!navigator.geolocation) {
+    alert('Geolocation is not supported by this browser.');
+    return;
+  }
+  watchId = navigator.geolocation.watchPosition(
+    pos => {
+      updateView(pos);
+      setPermission('granted');
+    },
+    onError,
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+  );
+  startBtn.disabled = true;
+  stopBtn.disabled = false;
+}
+
+function stopTracking() {
+  if (watchId != null) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+  }
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+  setPermission('stopped');
+}
+
+function getOnce() {
+  if (!navigator.geolocation) {
+    alert('Geolocation is not supported by this browser.');
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      updateView(pos);
+      setPermission('granted');
+    },
+    onError,
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+  );
+}
+
+async function copyCoords() {
+  const coords = `${latEl.textContent}, ${lonEl.textContent}`;
+  if (coords.includes('—')) {
+    alert('No coordinates to copy.');
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(coords);
+    copyBtn.textContent = 'Copied!';
+    setTimeout(() => copyBtn.textContent = 'Copy', 1200);
+  } catch {
+    alert('Failed to copy coordinates.');
+  }
+}
+
+async function checkPermission() {
+  if (!navigator.permissions) {
+    setPermission('unknown');
+    return;
+  }
+  try {
+    const status = await navigator.permissions.query({ name: 'geolocation' });
+    setPermission(status.state);
+    status.onchange = () => setPermission(status.state);
+  } catch {
+    setPermission('unknown');
+  }
+}
+
+startBtn.addEventListener('click', startTracking);
+stopBtn.addEventListener('click', stopTracking);
+getOnceBtn.addEventListener('click', getOnce);
+copyBtn.addEventListener('click', copyCoords);
+checkPermission();
+
+window.addEventListener('beforeunload', () => {
+  if (watchId != null) navigator.geolocation.clearWatch(watchId);
+});
+</script>
+</body>
+</html>
